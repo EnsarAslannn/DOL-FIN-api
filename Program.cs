@@ -5,6 +5,8 @@ using api.Models;
 using api.Repository;
 using api.Service;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -132,6 +134,12 @@ builder.Services.AddScoped<IPortfolioService, PortfolioService>();
 builder.Services.AddScoped<ITransactionRepository, TransactionRepository>();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
+// Without this, DataProtection keys live only in the container's ephemeral
+// filesystem: every redeploy generates a fresh key ring, silently
+// invalidating every previously-issued CSRF token (and anything else that
+// depends on DataProtection) until each client's next page load re-issues one.
+builder.Services.AddDataProtection().PersistKeysToDbContext<ApplicationDBContext>();
+
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     // Railway terminates TLS at its edge proxy and forwards plain HTTP to
@@ -157,6 +165,28 @@ builder.Services.AddAntiforgery(options =>
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
 });
 
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    // Login/register have no auth to gate them, so they're the natural
+    // target for credential-stuffing/brute-force attempts. Partitioned by
+    // client IP (via the trusted X-Forwarded-For set up above) rather than
+    // a single global bucket, so one abusive client can't lock everyone out.
+    options.AddPolicy(
+        "auth",
+        httpContext =>
+            System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                }
+            )
+    );
+});
 
 var app = builder.Build();
 
@@ -185,6 +215,7 @@ app.UseMiddleware<api.Middleware.ExceptionMiddleware>();
 
 app.UseRouting();
 app.UseCors("DolfinCorsPolicy");
+app.UseRateLimiter();
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();

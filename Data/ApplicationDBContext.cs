@@ -1,11 +1,12 @@
 using api.Models;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace api.Data
 {
-    public class ApplicationDBContext : IdentityDbContext<AppUser>
+    public class ApplicationDBContext : IdentityDbContext<AppUser>, IDataProtectionKeyContext
     {
         public ApplicationDBContext(DbContextOptions<ApplicationDBContext> dbContextOptions)
             : base(dbContextOptions) { }
@@ -17,6 +18,8 @@ namespace api.Data
         public DbSet<Portfolio> Portfolios { get; set; }
 
         public DbSet<Transaction> Transactions { get; set; }
+
+        public DbSet<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey> DataProtectionKeys { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
