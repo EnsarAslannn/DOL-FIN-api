@@ -149,6 +149,12 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
+    // Railway's X-Forwarded-For has two hops: "<real client ip>, <railway
+    // edge ip>". The default ForwardLimit of 1 only unwraps the nearest
+    // hop, which is Railway's own (rotating) edge IP -- not the real
+    // client -- silently breaking anything keyed on RemoteIpAddress (e.g.
+    // the login/register rate limiter below).
+    options.ForwardLimit = 2;
 });
 
 builder.Services.AddAntiforgery(options =>
