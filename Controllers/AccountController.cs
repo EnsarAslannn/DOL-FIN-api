@@ -101,6 +101,7 @@ namespace api.Controllers
         {
             Response.Cookies.Delete("access_token");
             Response.Cookies.Delete("XSRF-TOKEN");
+            Response.Cookies.Delete("af-token");
             return Ok();
         }
 
@@ -118,9 +119,37 @@ namespace api.Controllers
                 }
             );
 
-            // Issues the XSRF-TOKEN cookie the frontend echoes back as the
-            // X-CSRF-TOKEN header on mutating requests (double-submit check).
-            _antiforgery.GetAndStoreTokens(HttpContext);
+            // NOT issuing the CSRF cookie here: this request itself arrives
+            // unauthenticated (the access_token cookie only takes effect on
+            // the *next* request), and the antiforgery system binds a token
+            // to whatever identity was current when it was generated. Doing
+            // it here would bind the token to "anonymous", which then fails
+            // validation against the now-authenticated user on every
+            // subsequent request. The frontend calls GET /account/profile
+            // right after login/register, which issues it correctly.
+        }
+
+        // The antiforgery system pairs two DIFFERENT token values: an internal
+        // cookie token (never exposed to JS) and a "request token" that must
+        // be echoed back on mutating requests. GetAndStoreTokens sets the
+        // internal cookie as a side effect; we separately expose its
+        // RequestToken value in a JS-readable XSRF-TOKEN cookie so the
+        // frontend can read it and send it back as the X-CSRF-TOKEN header.
+        // Must only be called from a request where HttpContext.User already
+        // reflects the authenticated identity (see note on SetAuthCookie).
+        private void IssueCsrfCookie()
+        {
+            var tokens = _antiforgery.GetAndStoreTokens(HttpContext);
+            Response.Cookies.Append(
+                "XSRF-TOKEN",
+                tokens.RequestToken!,
+                new CookieOptions
+                {
+                    HttpOnly = false,
+                    Secure = true,
+                    SameSite = SameSiteMode.None,
+                }
+            );
         }
 
         [HttpGet("profile")]
@@ -130,7 +159,7 @@ namespace api.Controllers
             // A page refresh restores the session from the access_token cookie
             // alone; the XSRF-TOKEN cookie needs re-issuing here too so it
             // survives a full reload.
-            _antiforgery.GetAndStoreTokens(HttpContext);
+            IssueCsrfCookie();
 
             var userName = User.Identity?.Name
                 ?? User.FindFirst(ClaimTypes.Name)?.Value

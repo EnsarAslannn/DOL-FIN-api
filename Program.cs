@@ -5,6 +5,7 @@ using api.Models;
 using api.Repository;
 using api.Service;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -131,14 +132,27 @@ builder.Services.AddScoped<IPortfolioService, PortfolioService>();
 builder.Services.AddScoped<ITransactionRepository, TransactionRepository>();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    // Railway terminates TLS at its edge proxy and forwards plain HTTP to
+    // the container, so Request.IsHttps is false unless we trust its
+    // X-Forwarded-Proto header -- the antiforgery system in particular
+    // refuses to issue a Secure cookie without this.
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 builder.Services.AddAntiforgery(options =>
 {
     options.HeaderName = "X-CSRF-TOKEN";
-    options.Cookie.Name = "XSRF-TOKEN";
-    // Must be readable by JS so the frontend can echo it back as a header
-    // (double-submit cookie pattern) — the auth JWT stays httpOnly, this
-    // token carries no authority on its own.
-    options.Cookie.HttpOnly = false;
+    // This is the antiforgery system's own internal cookie token -- it is
+    // never read by JS. The value the frontend actually echoes back as the
+    // X-CSRF-TOKEN header is a *different*, paired value (the "request
+    // token") that AccountController issues in a separate XSRF-TOKEN
+    // cookie; see AccountController.IssueCsrfCookie.
+    options.Cookie.Name = "af-token";
+    options.Cookie.HttpOnly = true;
     options.Cookie.SameSite = SameSiteMode.None;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
 });
@@ -162,6 +176,8 @@ using (var scope = app.Services.CreateScope())
         }
     }
 }
+
+app.UseForwardedHeaders();
 
 app.UseSerilogRequestLogging();
 
@@ -190,8 +206,9 @@ app.Use(
             {
                 await antiforgery.ValidateRequestAsync(context);
             }
-            catch (Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException)
+            catch (Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException ex)
             {
+                Log.Warning(ex, "CSRF validation failed for {Method} {Path}", method, context.Request.Path);
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
                 await context.Response.WriteAsync("CSRF token missing or invalid.");
                 return;
