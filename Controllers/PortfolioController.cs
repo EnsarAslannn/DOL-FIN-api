@@ -1,3 +1,4 @@
+using api.Dtos.Portfolio;
 using api.Interfaces;
 using api.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -32,7 +33,7 @@ namespace api.Controllers
         }
 
         [HttpPost]
-        public async Task<IActionResult> AddPortfolio([FromQuery] string symbol, [FromQuery] int quantity)
+        public async Task<IActionResult> AddPortfolio([FromBody] TradeRequestDto request)
         {
             var appUser = await GetAuthenticatedUserAsync();
             if (appUser == null)
@@ -40,7 +41,7 @@ namespace api.Controllers
 
             try
             {
-                var result = await _portfolioService.BuyStockAsync(appUser, symbol, quantity);
+                var result = await _portfolioService.BuyStockAsync(appUser, request.Symbol, request.Quantity);
                 return Ok(result);
             }
             catch (ArgumentException ex)
@@ -58,7 +59,7 @@ namespace api.Controllers
         }
 
         [HttpPost("sell")]
-        public async Task<IActionResult> SellPortfolio([FromQuery] string symbol, [FromQuery] int quantity)
+        public async Task<IActionResult> SellPortfolio([FromBody] TradeRequestDto request)
         {
             var appUser = await GetAuthenticatedUserAsync();
             if (appUser == null)
@@ -66,7 +67,7 @@ namespace api.Controllers
 
             try
             {
-                var result = await _portfolioService.SellStockAsync(appUser, symbol, quantity);
+                var result = await _portfolioService.SellStockAsync(appUser, request.Symbol, request.Quantity);
                 return Ok(result);
             }
             catch (ArgumentException ex)
@@ -84,7 +85,7 @@ namespace api.Controllers
         }
 
         [HttpPost("deposit")]
-        public async Task<IActionResult> DepositFunds([FromQuery] decimal amount)
+        public async Task<IActionResult> DepositFunds([FromBody] AmountRequestDto request)
         {
             var appUser = await GetAuthenticatedUserAsync();
             if (appUser == null)
@@ -92,7 +93,7 @@ namespace api.Controllers
 
             try
             {
-                var result = await _portfolioService.DepositFundsAsync(appUser, amount);
+                var result = await _portfolioService.DepositFundsAsync(appUser, request.Amount);
                 return Ok(result);
             }
             catch (ArgumentException ex)
@@ -106,7 +107,7 @@ namespace api.Controllers
         }
 
         [HttpPost("withdraw")]
-        public async Task<IActionResult> WithdrawFunds([FromQuery] decimal amount)
+        public async Task<IActionResult> WithdrawFunds([FromBody] AmountRequestDto request)
         {
             var appUser = await GetAuthenticatedUserAsync();
             if (appUser == null)
@@ -114,7 +115,7 @@ namespace api.Controllers
 
             try
             {
-                var result = await _portfolioService.WithdrawFundsAsync(appUser, amount);
+                var result = await _portfolioService.WithdrawFundsAsync(appUser, request.Amount);
                 return Ok(result);
             }
             catch (ArgumentException ex)

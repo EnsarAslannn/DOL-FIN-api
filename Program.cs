@@ -39,7 +39,7 @@ builder.Services.AddCors(options =>
                     "http://localhost:5002"
                 )
                 .WithMethods("GET", "POST", "PUT", "DELETE")
-                .WithHeaders("Content-Type")
+                .WithHeaders("Content-Type", "X-CSRF-TOKEN")
                 .AllowCredentials();
         }
     );
@@ -131,6 +131,18 @@ builder.Services.AddScoped<IPortfolioService, PortfolioService>();
 builder.Services.AddScoped<ITransactionRepository, TransactionRepository>();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = "X-CSRF-TOKEN";
+    options.Cookie.Name = "XSRF-TOKEN";
+    // Must be readable by JS so the frontend can echo it back as a header
+    // (double-submit cookie pattern) — the auth JWT stays httpOnly, this
+    // token carries no authority on its own.
+    options.Cookie.HttpOnly = false;
+    options.Cookie.SameSite = SameSiteMode.None;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+});
+
 
 var app = builder.Build();
 
@@ -160,6 +172,35 @@ app.UseCors("DolfinCorsPolicy");
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.Use(
+    async (context, next) =>
+    {
+        var method = context.Request.Method;
+        var isMutatingRequest =
+            !HttpMethods.IsGet(method)
+            && !HttpMethods.IsHead(method)
+            && !HttpMethods.IsOptions(method)
+            && !HttpMethods.IsTrace(method);
+
+        if (context.User.Identity?.IsAuthenticated == true && isMutatingRequest)
+        {
+            var antiforgery = context.RequestServices.GetRequiredService<Microsoft.AspNetCore.Antiforgery.IAntiforgery>();
+            try
+            {
+                await antiforgery.ValidateRequestAsync(context);
+            }
+            catch (Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException)
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await context.Response.WriteAsync("CSRF token missing or invalid.");
+                return;
+            }
+        }
+
+        await next();
+    }
+);
 
 app.MapGet(
     "/openapi.json",

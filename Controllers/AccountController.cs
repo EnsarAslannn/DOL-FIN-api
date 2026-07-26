@@ -2,6 +2,7 @@ using System.Security.Claims;
 using api.Dtos.Account;
 using api.Interfaces;
 using api.Models;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -17,18 +18,21 @@ namespace api.Controllers
         private readonly ITokenService _tokenService;
         private readonly SignInManager<AppUser> _signInManager;
         private readonly Data.ApplicationDBContext _context;
+        private readonly IAntiforgery _antiforgery;
 
         public AccountController(
             UserManager<AppUser> userManager,
             ITokenService tokenService,
             SignInManager<AppUser> signInManager,
-            Data.ApplicationDBContext context
+            Data.ApplicationDBContext context,
+            IAntiforgery antiforgery
         )
         {
             _userManager = userManager;
             _tokenService = tokenService;
             _signInManager = signInManager;
             _context = context;
+            _antiforgery = antiforgery;
         }
 
         [HttpPost("login")]
@@ -96,6 +100,7 @@ namespace api.Controllers
         public IActionResult Logout()
         {
             Response.Cookies.Delete("access_token");
+            Response.Cookies.Delete("XSRF-TOKEN");
             return Ok();
         }
 
@@ -112,12 +117,21 @@ namespace api.Controllers
                     Expires = DateTimeOffset.UtcNow.AddDays(7),
                 }
             );
+
+            // Issues the XSRF-TOKEN cookie the frontend echoes back as the
+            // X-CSRF-TOKEN header on mutating requests (double-submit check).
+            _antiforgery.GetAndStoreTokens(HttpContext);
         }
 
         [HttpGet("profile")]
         [Authorize]
         public async Task<IActionResult> GetUserProfile()
         {
+            // A page refresh restores the session from the access_token cookie
+            // alone; the XSRF-TOKEN cookie needs re-issuing here too so it
+            // survives a full reload.
+            _antiforgery.GetAndStoreTokens(HttpContext);
+
             var userName = User.Identity?.Name
                 ?? User.FindFirst(ClaimTypes.Name)?.Value
                 ?? User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name")?.Value;
