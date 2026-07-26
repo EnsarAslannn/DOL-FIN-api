@@ -38,8 +38,8 @@ builder.Services.AddCors(options =>
                     "https://localhost:7109",
                     "http://localhost:5002"
                 )
-                .AllowAnyMethod()
-                .AllowAnyHeader()
+                .WithMethods("GET", "POST", "PUT", "DELETE")
+                .WithHeaders("Content-Type")
                 .AllowCredentials();
         }
     );
@@ -128,6 +128,8 @@ builder.Services.AddScoped<ICommentRepository, CommentRepository>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IPortfolioRepository, PortfolioRepository>();
 builder.Services.AddScoped<IPortfolioService, PortfolioService>();
+builder.Services.AddScoped<ITransactionRepository, TransactionRepository>();
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
 
 var app = builder.Build();

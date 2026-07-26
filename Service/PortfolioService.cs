@@ -1,4 +1,3 @@
-using api.Data;
 using api.Dtos;
 using api.Interfaces;
 using api.Models;
@@ -10,20 +9,23 @@ namespace api.Service
     {
         private readonly IPortfolioRepository _portfolioRepo;
         private readonly IStockRepository _stockRepo;
+        private readonly ITransactionRepository _transactionRepo;
+        private readonly IUnitOfWork _unitOfWork;
         private readonly UserManager<AppUser> _userManager;
-        private readonly ApplicationDBContext _context;
 
         public PortfolioService(
             IPortfolioRepository portfolioRepo,
             IStockRepository stockRepo,
-            UserManager<AppUser> userManager,
-            ApplicationDBContext context
+            ITransactionRepository transactionRepo,
+            IUnitOfWork unitOfWork,
+            UserManager<AppUser> userManager
         )
         {
             _portfolioRepo = portfolioRepo;
             _stockRepo = stockRepo;
+            _transactionRepo = transactionRepo;
+            _unitOfWork = unitOfWork;
             _userManager = userManager;
-            _context = context;
         }
 
         public async Task<List<PortfolioDto>> GetUserPortfolioAsync(AppUser user)
@@ -45,8 +47,7 @@ namespace api.Service
             if (user.WalletBalance < totalCost)
                 throw new InvalidOperationException($"Insufficient funds. Required: ${totalCost:F2}, Available: ${user.WalletBalance:F2}");
 
-            using var dbTransaction = await _context.Database.BeginTransactionAsync();
-            try
+            return await _unitOfWork.ExecuteInTransactionAsync(async () =>
             {
                 user.WalletBalance -= totalCost;
                 await _userManager.UpdateAsync(user);
@@ -75,7 +76,7 @@ namespace api.Service
                     await _portfolioRepo.CreateAsync(portfolioModel);
                 }
 
-                var transactionLog = new Transaction
+                await _transactionRepo.AddAsync(new Transaction
                 {
                     AppUserId = user.Id,
                     Symbol = stock.Symbol.ToUpper(),
@@ -84,19 +85,10 @@ namespace api.Service
                     Quantity = quantity,
                     Price = stock.Purchase,
                     Timestamp = DateTime.UtcNow
-                };
+                });
 
-                await _context.Transactions.AddAsync(transactionLog);
-                await _context.SaveChangesAsync();
-                await dbTransaction.CommitAsync();
-
-                return new { Message = "Stock purchased successfully", NewBalance = user.WalletBalance };
-            }
-            catch (Exception)
-            {
-                await dbTransaction.RollbackAsync();
-                throw;
-            }
+                return (object)new { Message = "Stock purchased successfully", NewBalance = user.WalletBalance };
+            });
         }
 
         public async Task<object> SellStockAsync(AppUser user, string symbol, int quantity)
@@ -114,8 +106,7 @@ namespace api.Service
 
             decimal totalRevenue = stock.Purchase * quantity;
 
-            using var dbTransaction = await _context.Database.BeginTransactionAsync();
-            try
+            return await _unitOfWork.ExecuteInTransactionAsync(async () =>
             {
                 user.WalletBalance += totalRevenue;
                 await _userManager.UpdateAsync(user);
@@ -130,7 +121,7 @@ namespace api.Service
                     await _portfolioRepo.UpdateAsync(existingPosition);
                 }
 
-                var transactionLog = new Transaction
+                await _transactionRepo.AddAsync(new Transaction
                 {
                     AppUserId = user.Id,
                     Symbol = stock.Symbol.ToUpper(),
@@ -139,19 +130,10 @@ namespace api.Service
                     Quantity = quantity,
                     Price = stock.Purchase,
                     Timestamp = DateTime.UtcNow
-                };
+                });
 
-                await _context.Transactions.AddAsync(transactionLog);
-                await _context.SaveChangesAsync();
-                await dbTransaction.CommitAsync();
-
-                return new { Message = "Stock sold successfully", NewBalance = user.WalletBalance };
-            }
-            catch (Exception)
-            {
-                await dbTransaction.RollbackAsync();
-                throw;
-            }
+                return (object)new { Message = "Stock sold successfully", NewBalance = user.WalletBalance };
+            });
         }
 
         public async Task<object> DepositFundsAsync(AppUser user, decimal amount)
@@ -159,8 +141,7 @@ namespace api.Service
             if (amount <= 0)
                 throw new ArgumentException("Deposit amount must be greater than 0");
 
-            using var dbTransaction = await _context.Database.BeginTransactionAsync();
-            try
+            return await _unitOfWork.ExecuteInTransactionAsync(async () =>
             {
                 user.WalletBalance += amount;
                 var updateResult = await _userManager.UpdateAsync(user);
@@ -168,7 +149,7 @@ namespace api.Service
                 if (!updateResult.Succeeded)
                     throw new Exception("Failed to update user wallet balance.");
 
-                var transactionLog = new Transaction
+                await _transactionRepo.AddAsync(new Transaction
                 {
                     AppUserId = user.Id,
                     Symbol = "CASH",
@@ -177,19 +158,10 @@ namespace api.Service
                     Quantity = 1,
                     Price = amount,
                     Timestamp = DateTime.UtcNow
-                };
+                });
 
-                await _context.Transactions.AddAsync(transactionLog);
-                await _context.SaveChangesAsync();
-                await dbTransaction.CommitAsync();
-
-                return new { Message = "Funds deposited successfully", NewBalance = user.WalletBalance };
-            }
-            catch (Exception)
-            {
-                await dbTransaction.RollbackAsync();
-                throw;
-            }
+                return (object)new { Message = "Funds deposited successfully", NewBalance = user.WalletBalance };
+            });
         }
 
         public async Task<object> WithdrawFundsAsync(AppUser user, decimal amount)
@@ -200,8 +172,7 @@ namespace api.Service
             if (user.WalletBalance < amount)
                 throw new InvalidOperationException($"Insufficient funds. Available: ${user.WalletBalance:F2}");
 
-            using var dbTransaction = await _context.Database.BeginTransactionAsync();
-            try
+            return await _unitOfWork.ExecuteInTransactionAsync(async () =>
             {
                 user.WalletBalance -= amount;
                 var updateResult = await _userManager.UpdateAsync(user);
@@ -209,7 +180,7 @@ namespace api.Service
                 if (!updateResult.Succeeded)
                     throw new Exception("Failed to update user wallet balance.");
 
-                var transactionLog = new Transaction
+                await _transactionRepo.AddAsync(new Transaction
                 {
                     AppUserId = user.Id,
                     Symbol = "CASH",
@@ -218,19 +189,10 @@ namespace api.Service
                     Quantity = 1,
                     Price = amount,
                     Timestamp = DateTime.UtcNow
-                };
+                });
 
-                await _context.Transactions.AddAsync(transactionLog);
-                await _context.SaveChangesAsync();
-                await dbTransaction.CommitAsync();
-
-                return new { Message = "Funds withdrawn successfully", NewBalance = user.WalletBalance };
-            }
-            catch (Exception)
-            {
-                await dbTransaction.RollbackAsync();
-                throw;
-            }
+                return (object)new { Message = "Funds withdrawn successfully", NewBalance = user.WalletBalance };
+            });
         }
     }
 }

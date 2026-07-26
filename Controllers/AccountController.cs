@@ -114,7 +114,7 @@ namespace api.Controllers
             );
         }
 
-        [HttpPost("profile")]
+        [HttpGet("profile")]
         [Authorize]
         public async Task<IActionResult> GetUserProfile()
         {
